@@ -48,7 +48,7 @@ func debugEtcdValueParsing(s [][]byte) {
 	iv := s[5][:16] // first 16 bytes are the CBC initialization vector!
 	fmt.Printf("iv %x \n", iv)
 
-	ciphertext := s[5][16:]
+	ciphertext := s[5] // first 16 bytes, the IV vector, must stay included!
 
 	// ciphertext must be divisiable by 16! AES is a block cipher with a blocksize of always 16bytes
 	fmt.Println("ciphertext bytes:", len(ciphertext))
@@ -124,7 +124,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	fmt.Println("etcdValue length:", len(etcdValue))
 	s, err := binaryFromEtcdValue(etcdValue)
 	if err != nil {
 		fmt.Printf("bad format: %v\n", err)
@@ -142,37 +141,58 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Get binary data as bytes
-	secret := s[5][16:]
 	aesKeyBase64 := aes_key
-
 	block, err := newAESCipher(aesKeyBase64)
 	if err != nil {
 		fmt.Printf("Error creating AESCipher: %v", err)
 		os.Exit(1)
 	}
 
-	cbcTransformer := aestransformer.NewCBCTransformer(block)
-	clearText, _, err := cbcTransformer.TransformFromStorage(secret, value.DefaultContext{})
+	// Get initialization vecotr + encrypted binary data as bytes:
+	secret := s[5]
+	// use transformer based on metadata
+	var transformer value.Transformer
+	var clearText []byte
+	switch string(s[2]) {
+	case "aescbc":
+		fmt.Printf("Secret is CBC-encrypted: %v\n", string(s[2]))
+		transformer = aestransformer.NewCBCTransformer(block)
+		clearText, _, err = transformer.TransformFromStorage(secret, value.DefaultContext{})
+	case "aesgcm":
+		fmt.Printf("Secret is GCM-encrypted: %v\n", string(s[2]))
+		transformer = aestransformer.NewGCMTransformer(block)
+		clearText, _, err = transformer.TransformFromStorage(secret, value.DefaultContext{})
+	default:
+		fmt.Printf("Unknown encryption: %v\n", string(s[2]))
+	}
+
 	if err != nil {
-		fmt.Printf("Failed to transform secret: %v\n", err)
+		fmt.Println("Couldn't decrypt secret", err)
 		os.Exit(1)
 	}
 
-	// var fdOut *os.File
-	// if *outputFlag != "" {
-	// 	fdOut, err = os.Open(*outputFlag)
-	// 	if err != nil {
-	// 		panic(err)
-	// 	}
-	// } else {
-	// 	fmt.Println(string(clearText)) // Print the protobuf object
+	// cbcTransformer := aestransformer.NewCBCTransformer(block)
+	// clearText, _, err = cbcTransformer.TransformFromStorage(secret, value.DefaultContext{})
+	// if err != nil {
+	// 	fmt.Printf("Failed to transform secret: %v\n", err)
+	// 	os.Exit(1)
 	// }
 
-	fmt.Println(string(clearText)) // Print the protobuf object
-	// TODO fix output, allow writing to file
-	// BUG: Aufgefallen ist mir das Insbesondere bei Secrets mit Username und Password,
-	// da stand dann "sername" (ohne U) und "assword" (ohne P).
+	var fdOut *os.File
+	if *outputFlag != "" {
+		fdOut, err = os.Create(*outputFlag)
+		if err != nil {
+			panic(err)
+		}
+		fdOut.Write(clearText)
+		defer func() {
+			if err := fdOut.Close(); err != nil {
+				panic(err)
+			}
+		}()
+	} else {
+		fmt.Println(string(clearText)) // Print the protobuf object
+	}
 
 }
 
