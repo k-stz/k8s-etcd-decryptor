@@ -23,6 +23,16 @@ $ go build .
 $ ./k8s-etcd-decryptor
 ```
 
+## Using Dockerfile
+build the Dockerfile and mount input files to be decrypted into it containing the encrypted and encoded etcd-Values.
+
+```bash
+# Mount examples and run interactive shell
+docker run -v $(pwd)../testValues:/testValues:Z --rm -it k8s-etcd-decryptor bash
+# provide example files
+$ /k8s-etcd-decryptor -in /testValues/encryptedEtcdValueBase64.txt -key MyAESKeyBase64= -out /testValues/decrytped-plaintext.txt
+```
+
 ## Usage
 
 To decrypt a certain object from a Kubernetes etcd, proceed as follows:
