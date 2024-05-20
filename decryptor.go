@@ -15,19 +15,6 @@ import (
 	aestransformer "k8s.io/apiserver/pkg/storage/value/encrypt/aes"
 )
 
-func readNextString(reader *bufio.Reader) (readString string) {
-	fmt.Print("Enter base64-encoded encryption key from EncryptionConfig: ")
-	readString, err := reader.ReadString('\n') // read till encoutering '\n'
-	if err == io.EOF {
-		return readString
-	}
-	if err != nil {
-		fmt.Printf("Error reading line: %v\n", err)
-		os.Exit(1)
-	}
-	return readString
-}
-
 func binaryFromEtcdValue(byteSlice []byte) (result [][]byte, err error) {
 	// K8s APIServer encrypted etcd values contain metadata at the beginning that is
 	// separated by 5 colons (ascii decimal 58). binaryFromEtcdValue parses them out
@@ -76,29 +63,59 @@ func getenv(key string) (string, error) {
 	return value, nil
 }
 
+func readNextString(reader *bufio.Reader) (readString string) {
+	fmt.Print("Enter base64-encoded encryption key from EncryptionConfig: ")
+	readString, err := reader.ReadString('\n') // read till encoutering '\n'
+	if err == io.EOF {
+		return readString
+	}
+	if err != nil {
+		fmt.Printf("Error reading line: %v\n", err)
+		os.Exit(1)
+	}
+	return readString
+}
+
+var (
+	inputFlag  *string = flag.String("in", "", "File containing base64 encoded etcd values. If missing STDIN is used.")
+	outputFlag *string = flag.String("out", "", "File where decrypted plaintext will be written to. If missing STDOUT is used.")
+	keyFlag    *string = flag.String("key", "", "AES-CBC 256-bit key. Must be Base64 encoded!")
+	debugFlag  *bool   = flag.Bool("debug", false, "Prints debug information while running tool.")
+)
+
 func main() {
 	fmt.Println("Tool to decrypt AES-CBC-encrypted objects from etcd")
-
-	debug := false
-
-	keyFlag := flag.String("key", "NOT SET", "AES-CBC 256-bit key. Must be Base64 encoded!")
 	flag.Parse()
 
+	// Get AES Key
 	var aes_key string
 	var err error
-	if *keyFlag == "NOT SET" {
+	if *keyFlag == "" {
 		// Try to read from env var
 		aes_key, err = getenv("AES_KEY")
 		if err != nil {
 			fmt.Println(err)
 			fmt.Println("Environment variable AES_KEY empty and -key flag not provided. No AES Key to work with. Aborting.")
+			flag.Usage()
 			os.Exit(1)
 		}
 	} else {
 		aes_key = *keyFlag
 	}
 
-	reader := bufio.NewReader(os.Stdin)
+	// Get input etcd Value: (from File or SDTIN)
+	var reader *bufio.Reader
+	var fd *os.File
+	if *inputFlag != "" {
+		fd, err = os.Open(*inputFlag)
+		if err != nil {
+			panic(err)
+		}
+		reader = bufio.NewReader(fd)
+	} else {
+		reader = bufio.NewReader(os.Stdin)
+	}
+	defer fd.Close()
 	base64EtcdValue := readNextString(reader)
 
 	etcdValue, err := base64.StdEncoding.DecodeString(base64EtcdValue)
@@ -116,7 +133,7 @@ func main() {
 
 	// Decoded string looks like this: "k8s:enc:aescbc:v1:<provider-name>:<binary-aes-encrypted-data>"
 	// "<binary-aes-encrypted-data>" := "<16 byte IV><rest-of-data>"
-	if debug {
+	if *debugFlag {
 		debugEtcdValueParsing(s)
 	}
 
@@ -142,10 +159,21 @@ func main() {
 		os.Exit(1)
 	}
 
+	// var fdOut *os.File
+	// if *outputFlag != "" {
+	// 	fdOut, err = os.Open(*outputFlag)
+	// 	if err != nil {
+	// 		panic(err)
+	// 	}
+	// } else {
+	// 	fmt.Println(string(clearText)) // Print the protobuf object
+	// }
+
+	fmt.Println(string(clearText)) // Print the protobuf object
 	// TODO fix output, allow writing to file
 	// BUG: Aufgefallen ist mir das Insbesondere bei Secrets mit Username und Password,
 	// da stand dann "sername" (ohne U) und "assword" (ohne P).
-	fmt.Println(string(clearText)) // Print the protobuf object
+
 }
 
 func newAESCipher(key string) (cipher.Block, error) {
