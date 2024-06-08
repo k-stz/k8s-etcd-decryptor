@@ -81,3 +81,12 @@ mysupersecretOpaque"
 ```
 
 This will show the object (a `Secret` in this case) as a string, which is not very nice but works well for most use-cases.
+
+# Query etcd in minikube
+1. start minikube and docker exec into it
+2. install etcdctl inside: sudo apt-get update -y && sudo apt-get install -y etcd-client
+3. `cd /var/lib/minikube/certs/etcd`
+4. Do queries:
+```bash
+ETCDCTL_API=3 etcdctl --cacert ca.crt --cert server.crt --key server.key --endpoints https://127.0.0.1:2379 get / --prefix --keys-only
+```
